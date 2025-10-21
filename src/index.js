@@ -5,7 +5,7 @@ import { getBaseData } from "./utils/larkBase.js";
 const app = express();
 app.use(express.json());
 
-/** Init Lark client */
+/** 🔹 Inisialisasi Lark Client */
 const client = new lark.Client({
   appId: process.env.LARK_APP_ID,
   appSecret: process.env.LARK_APP_SECRET,
@@ -13,12 +13,12 @@ const client = new lark.Client({
   domain: lark.Domain.Lark,
 });
 
-/** Webhook utama dari Lark */
+/** 🔹 Webhook utama dari Lark */
 app.post("/api/lark", async (req, res) => {
   try {
     const { header, event } = req.body;
 
-    // Handle verifikasi URL pertama kali
+    // Handle verifikasi URL dari Lark
     if (header?.event_type === "url_verification") {
       return res.send({ challenge: req.body.challenge });
     }
@@ -29,22 +29,39 @@ app.post("/api/lark", async (req, res) => {
     const records = await getBaseData();
     console.log(`✅ Lark Base OK: ${records.length} records diambil`);
 
-    // Coba kirim pesan balasan ke user
-    const chatId = event?.message?.chat_id;
-    if (chatId) {
-      await client.im.message.create({
-        params: { receive_id_type: "chat_id" },
-        data: {
-          receive_id: chatId,
-          msg_type: "text",
-          content: JSON.stringify({
-            text: `📊 Lark Base berhasil dibaca: ${records.length} baris data 🚀`,
-          }),
-        },
-      });
-      console.log(`📤 Balasan dikirim ke chat_id: ${chatId}`);
-    } else {
-      console.warn("⚠️ Tidak ada chat_id di event.message");
+    /** ============================
+     *  Kirim Pesan Balasan ke User
+     * ============================ */
+    try {
+      // Ambil ID penerima dari berbagai kemungkinan (chat_id, open_chat_id, open_id)
+      const receiveId =
+        event?.message?.chat_id ||
+        event?.message?.open_chat_id ||
+        event?.sender?.sender_id?.open_id;
+
+      const receiveType = event?.message?.chat_id
+        ? "chat_id"
+        : event?.message?.open_chat_id
+        ? "open_chat_id"
+        : "open_id";
+
+      if (!receiveId) {
+        console.warn("⚠️ Tidak ada receive_id yang valid, pesan tidak dikirim.");
+      } else {
+        await client.im.message.create({
+          params: { receive_id_type: receiveType },
+          data: {
+            receive_id: receiveId,
+            msg_type: "text",
+            content: JSON.stringify({
+              text: `📊 Lark Base berhasil dibaca: ${records.length} baris data 🚀`,
+            }),
+          },
+        });
+        console.log(`📤 Balasan dikirim ke ${receiveType}: ${receiveId}`);
+      }
+    } catch (sendErr) {
+      console.error("❌ Gagal kirim pesan:", sendErr.response?.data || sendErr.message);
     }
 
     res.status(200).send({ ok: true });
@@ -54,9 +71,9 @@ app.post("/api/lark", async (req, res) => {
   }
 });
 
-/** Route root */
+/** 🔹 Root route (tes server) */
 app.get("/", (req, res) => {
-  res.send("🚀 Lark Bot Server is running!");
+  res.send("🚀 Lark Bot Server is running and connected to Lark Base!");
 });
 
 export default app;

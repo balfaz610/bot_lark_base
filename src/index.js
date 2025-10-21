@@ -13,9 +13,7 @@ const client = new lark.Client({
   domain: lark.Domain.Lark,
 });
 
-/**
- * Fungsi bantu: kirim pesan balik ke user
- */
+// 🔹 Kirim pesan ke Lark chat
 async function sendMessage(receiveType, receiveId, text) {
   await client.im.message.create({
     params: { receive_id_type: receiveType },
@@ -27,14 +25,11 @@ async function sendMessage(receiveType, receiveId, text) {
   });
 }
 
-/**
- * 🔹 Webhook utama dari Lark (chat event)
- */
+// 🔹 Webhook utama dari Lark
 app.post("/api/lark", async (req, res) => {
   try {
     const { header, event } = req.body;
 
-    // URL verification
     if (header?.event_type === "url_verification") {
       return res.send({ challenge: req.body.challenge });
     }
@@ -60,19 +55,19 @@ app.post("/api/lark", async (req, res) => {
       return res.status(200).send();
     }
 
-    // 🔹 Step 1: Ambil semua data dari Lark Base
+    // 🔹 Ambil data dari Lark Base
     const data = await getBaseData();
+    console.log(`📦 Data Lark Base terambil: ${data.length} record`);
 
-    // 🔹 Step 2: Kirim perintah user ke Gemini buat interpretasi filter
+    // 🔹 Prompt ke Gemini
     const prompt = `
-Kamu adalah asisten untuk memfilter data orang.
-User akan memberikan perintah dalam bahasa natural seperti:
-- "tampilkan semua perempuan"
-- "data laki-laki umur di atas 30"
-- "orang yang umurnya di bawah 25"
-Balas dengan kode JavaScript valid yang berisi kondisi filter array data.
-Contoh:
+Kamu adalah asisten untuk memfilter data array JavaScript bernama "data".
+Balas HANYA dengan satu baris kode JavaScript valid.
+Contoh balasan yang BENAR:
 return data.filter(p => p.Jenis_Kelamin === "Perempuan");
+
+Contoh balasan yang SALAH:
+"Tentu! Berikut hasilnya..." ❌
 `;
 
     const geminiRes = await axios.post(
@@ -89,23 +84,31 @@ return data.filter(p => p.Jenis_Kelamin === "Perempuan");
       }
     );
 
-    const codeBlock =
+    // 🔹 Ambil kode dari Gemini
+    let codeBlock =
       geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const code = codeBlock
-      .replace(/```(js|javascript)?/g, "")
+
+    // Bersihin kode supaya gak ada kalimat tambahan
+    const cleanCode = codeBlock
+      .replace(/```(js|javascript)?/gi, "")
       .replace(/```/g, "")
+      .replace(/^.*return/, "return") // ambil dari kata return
+      .split("\n")[0] // ambil baris pertama aja
       .trim();
+
+    console.log("🧠 Kode filter dari Gemini:", cleanCode);
 
     let hasil = [];
     try {
-      // Jalankan kode filter dari Gemini
-      const fn = new Function("data", code);
+      const fn = new Function("data", cleanCode);
       hasil = fn(data);
     } catch (err) {
       console.error("⚠️ Gagal evaluasi filter:", err.message);
+      await sendMessage(receiveType, receiveId, "⚠️ Instruksi tidak valid. Coba ulangi dengan kalimat lain.");
+      return res.status(200).send();
     }
 
-    // 🔹 Step 3: Format hasil
+    // 🔹 Kirim hasil balik
     if (!hasil?.length) {
       await sendMessage(receiveType, receiveId, "Tidak ada data yang cocok, bro 😅");
     } else {
@@ -123,9 +126,8 @@ return data.filter(p => p.Jenis_Kelamin === "Perempuan");
   }
 });
 
-/** 🔹 Root route */
 app.get("/", (req, res) => {
-  res.send("🤖 Lark-Gemini Bot siap bantu filter data Lark Base!");
+  res.send("🤖 Lark-Gemini Bot siap bantu filter data dari Lark Base!");
 });
 
 export default app;

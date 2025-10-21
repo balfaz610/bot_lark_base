@@ -1,11 +1,11 @@
 import express from "express";
 import lark from "@larksuiteoapi/node-sdk";
+import axios from "axios";
 import { getBaseData } from "./utils/larkBase.js";
 
 const app = express();
 app.use(express.json());
 
-/** 🔹 Inisialisasi Lark Client */
 const client = new lark.Client({
   appId: process.env.LARK_APP_ID,
   appSecret: process.env.LARK_APP_SECRET,
@@ -13,67 +13,119 @@ const client = new lark.Client({
   domain: lark.Domain.Lark,
 });
 
-/** 🔹 Webhook utama dari Lark */
+/**
+ * Fungsi bantu: kirim pesan balik ke user
+ */
+async function sendMessage(receiveType, receiveId, text) {
+  await client.im.message.create({
+    params: { receive_id_type: receiveType },
+    data: {
+      receive_id: receiveId,
+      msg_type: "text",
+      content: JSON.stringify({ text }),
+    },
+  });
+}
+
+/**
+ * 🔹 Webhook utama dari Lark (chat event)
+ */
 app.post("/api/lark", async (req, res) => {
   try {
     const { header, event } = req.body;
 
-    // Handle verifikasi URL dari Lark
+    // URL verification
     if (header?.event_type === "url_verification") {
       return res.send({ challenge: req.body.challenge });
     }
 
     console.log("📩 Event diterima:", header?.event_type);
 
-    // Ambil data dari Lark Base
-    const records = await getBaseData();
-    console.log(`✅ Lark Base OK: ${records.length} records diambil`);
+    const userMessage = event?.message?.content
+      ? JSON.parse(event.message.content).text
+      : "";
 
-    /** ============================
-     *  Kirim Pesan Balasan ke User
-     * ============================ */
-    try {
-      // Ambil ID penerima dari berbagai kemungkinan (chat_id, open_chat_id, open_id)
-      const receiveId =
-        event?.message?.chat_id ||
-        event?.message?.open_chat_id ||
-        event?.sender?.sender_id?.open_id;
+    const receiveId =
+      event?.message?.chat_id ||
+      event?.message?.open_chat_id ||
+      event?.sender?.sender_id?.open_id;
+    const receiveType = event?.message?.chat_id
+      ? "chat_id"
+      : event?.message?.open_chat_id
+      ? "open_chat_id"
+      : "open_id";
 
-      const receiveType = event?.message?.chat_id
-        ? "chat_id"
-        : event?.message?.open_chat_id
-        ? "open_chat_id"
-        : "open_id";
+    if (!userMessage) {
+      await sendMessage(receiveType, receiveId, "⚠️ Pesan kosong, bro.");
+      return res.status(200).send();
+    }
 
-      if (!receiveId) {
-        console.warn("⚠️ Tidak ada receive_id yang valid, pesan tidak dikirim.");
-      } else {
-        await client.im.message.create({
-          params: { receive_id_type: receiveType },
-          data: {
-            receive_id: receiveId,
-            msg_type: "text",
-            content: JSON.stringify({
-              text: `📊 Lark Base berhasil dibaca: ${records.length} baris data 🚀`,
-            }),
+    // 🔹 Step 1: Ambil semua data dari Lark Base
+    const data = await getBaseData();
+
+    // 🔹 Step 2: Kirim perintah user ke Gemini buat interpretasi filter
+    const prompt = `
+Kamu adalah asisten untuk memfilter data orang.
+User akan memberikan perintah dalam bahasa natural seperti:
+- "tampilkan semua perempuan"
+- "data laki-laki umur di atas 30"
+- "orang yang umurnya di bawah 25"
+Balas dengan kode JavaScript valid yang berisi kondisi filter array data.
+Contoh:
+return data.filter(p => p.Jenis_Kelamin === "Perempuan");
+`;
+
+    const geminiRes = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
+      {
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              { text: `Perintah user: ${userMessage}` },
+            ],
           },
-        });
-        console.log(`📤 Balasan dikirim ke ${receiveType}: ${receiveId}`);
+        ],
       }
-    } catch (sendErr) {
-      console.error("❌ Gagal kirim pesan:", sendErr.response?.data || sendErr.message);
+    );
+
+    const codeBlock =
+      geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const code = codeBlock
+      .replace(/```(js|javascript)?/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let hasil = [];
+    try {
+      // Jalankan kode filter dari Gemini
+      const fn = new Function("data", code);
+      hasil = fn(data);
+    } catch (err) {
+      console.error("⚠️ Gagal evaluasi filter:", err.message);
+    }
+
+    // 🔹 Step 3: Format hasil
+    if (!hasil?.length) {
+      await sendMessage(receiveType, receiveId, "Tidak ada data yang cocok, bro 😅");
+    } else {
+      const teks = hasil
+        .slice(0, 5)
+        .map((p, i) => `${i + 1}. ${p.Nama} (${p.Jenis_Kelamin}, ${p.Umur})`)
+        .join("\n");
+      await sendMessage(receiveType, receiveId, `📊 Hasil pencarian:\n${teks}`);
     }
 
     res.status(200).send({ ok: true });
   } catch (err) {
-    console.error("❌ Error di /api/lark:", err.message);
+    console.error("❌ Error /api/lark:", err.response?.data || err.message);
     res.status(500).send({ error: err.message });
   }
 });
 
-/** 🔹 Root route (tes server) */
+/** 🔹 Root route */
 app.get("/", (req, res) => {
-  res.send("🚀 Lark Bot Server is running and connected to Lark Base!");
+  res.send("🤖 Lark-Gemini Bot siap bantu filter data Lark Base!");
 });
 
 export default app;

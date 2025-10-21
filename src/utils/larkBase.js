@@ -1,9 +1,5 @@
 import axios from "axios";
 
-/**
- * Ambil tenant access token dinamis dari Lark.
- * Token ini valid ±2 jam, jadi selalu fresh dan gak expired.
- */
 export async function getTenantAccessToken() {
   try {
     const res = await axios.post(
@@ -21,12 +17,8 @@ export async function getTenantAccessToken() {
   }
 }
 
-/**
- * Fetch data dari Lark Base (Bitable)
- */
 export async function getBaseData() {
   const token = await getTenantAccessToken();
-
   const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_APP_TOKEN}/tables/${process.env.LARK_TABLE_ID}/records`;
 
   for (let i = 0; i < 3; i++) {
@@ -35,7 +27,7 @@ export async function getBaseData() {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 10000,
       });
-      return res.data?.data?.items || [];
+      return res.data?.data?.items.map((r) => r.fields) || [];
     } catch (err) {
       if (i === 2) {
         console.error("❌ Lark Base error (final):", err.response?.data || err.message);

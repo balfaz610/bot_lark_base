@@ -33,7 +33,7 @@ export async function getBaseData() {
     try {
       const res = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000, // 10 detik
+        timeout: 10000,
       });
       return res.data?.data?.items || [];
     } catch (err) {

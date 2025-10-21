@@ -18,7 +18,8 @@ try {
     const firebaseConfigPath =
       process.env.FIREBASE_CONFIG_PATH || path.join(__dirname, "..", "firebase-key.json");
 
-    if (!fs.existsSync(firebaseConfigPath)) throw new Error("Firebase config file tidak ditemukan!");
+    if (!fs.existsSync(firebaseConfigPath))
+      throw new Error("Firebase config file tidak ditemukan!");
     serviceAccount = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
     console.log("✅ Firebase key loaded from local file");
   }

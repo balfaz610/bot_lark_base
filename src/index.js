@@ -10,7 +10,7 @@ const app = express();
 app.use(express.json());
 
 // ====================================================
-// 🔹 Inisialisasi Client Lark
+// 🔹 LARK CLIENT
 // ====================================================
 const client = new lark.Client({
   appId: process.env.LARK_APP_ID,
@@ -20,7 +20,7 @@ const client = new lark.Client({
 });
 
 // ====================================================
-// 🔹 Fungsi Kirim Pesan ke Chat
+// 🔹 Kirim Pesan Balasan ke Lark
 // ====================================================
 async function sendMessage(receiveType, receiveId, text) {
   try {
@@ -38,13 +38,13 @@ async function sendMessage(receiveType, receiveId, text) {
 }
 
 // ====================================================
-// 🔹 Webhook Lark
+// 🔹 Webhook Handler
 // ====================================================
 app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // ✅ URL verification
+    // ✅ Validasi URL Webhook
     if (type === "url_verification") {
       return res.json({ challenge });
     }
@@ -61,10 +61,8 @@ app.post("/api/lark", async (req, res) => {
       return res.status(200).send();
     }
 
-    console.log(`📩 Pesan user: ${userMessage}`);
-
     // ====================================================
-    // 🔹 Ambil Data dari Lark Base
+    // 🔹 Ambil data dari Lark Base
     // ====================================================
     const { columns, records } = await getBaseData();
     if (records.length === 0) {
@@ -73,25 +71,23 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Buat Prompt Dynamic ke Gemini (Natural NLP)
+    // 🔹 Prompt dinamis (biar NLP bebas, bukan template)
     // ====================================================
     const prompt = `
-Kamu adalah asisten AI yang dapat membaca dan memahami data berbentuk JSON.
-Data berikut diambil dari Lark Base (maksimal 50 data pertama):
-
-${JSON.stringify(records.slice(0, 50), null, 2)}
-
-Tugas kamu:
-- Jawablah pertanyaan user berdasarkan data di atas.
-- Gunakan Bahasa Indonesia.
-- Jawaban harus dalam bentuk daftar ringkas jika ada lebih dari 1 hasil.
-- Jika tidak ada hasil yang cocok, katakan: "Tidak ditemukan data yang sesuai."
+Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
+Kolom: ${columns.join(", ")}
+Data (maks 30 contoh):
+${JSON.stringify(records.slice(0, 30), null, 2)}
 
 User bertanya: "${userMessage}"
-
-Jawaban:
+Jawablah berdasarkan data di atas. 
+Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
+Gunakan bahasa Indonesia alami, jangan formal, dan jawab seolah-olah kamu ngobrol santai.
 `;
 
+    // ====================================================
+    // 🔹 Kirim ke Gemini API
+    // ====================================================
     const geminiRes = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
       {
@@ -103,8 +99,6 @@ Jawaban:
       geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "⚠️ Tidak ada respons dari Gemini.";
 
-    console.log("🤖 Jawaban Gemini:", reply);
-
     await sendMessage(receiveType, receiveId, reply);
     res.status(200).send({ ok: true });
   } catch (err) {
@@ -114,20 +108,16 @@ Jawaban:
 });
 
 // ====================================================
-// 🔹 Default Route
-// ====================================================
-app.get("/", (req, res) => {
-  res.send("✅ Lark Bot + Gemini + Lark Base sudah aktif bro!");
-});
-
-// ====================================================
 // 🔹 Jalankan Lokal
 // ====================================================
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
-    console.log(`🚀 Server jalan di http://localhost:${PORT}`);
+    console.log(`🚀 Server running di http://localhost:${PORT}`);
   });
 }
 
+// ====================================================
+// 🔹 Export untuk Vercel
+// ====================================================
 export default app;

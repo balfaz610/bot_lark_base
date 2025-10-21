@@ -9,6 +9,11 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+// ✅ Tambahin ini bro (biar GET ke root gak 404)
+app.get("/", (req, res) => {
+  res.status(200).send("✅ Bot Lark Base aktif, bro!");
+});
+
 // ====================================================
 // 🔹 LARK CLIENT
 // ====================================================
@@ -71,7 +76,7 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt dinamis (biar NLP bebas, bukan template)
+    // 🔹 Prompt dinamis (biar NLP bebas)
     // ====================================================
     const prompt = `
 Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
@@ -82,7 +87,7 @@ ${JSON.stringify(records.slice(0, 30), null, 2)}
 User bertanya: "${userMessage}"
 Jawablah berdasarkan data di atas. 
 Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
-Gunakan bahasa Indonesia alami, jangan formal, dan jawab seolah-olah kamu ngobrol santai.
+Gunakan bahasa Indonesia alami dan santai.
 `;
 
     // ====================================================
@@ -90,9 +95,7 @@ Gunakan bahasa Indonesia alami, jangan formal, dan jawab seolah-olah kamu ngobro
     // ====================================================
     const geminiRes = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-      }
+      { contents: [{ parts: [{ text: prompt }] }] }
     );
 
     const reply =

@@ -1,5 +1,8 @@
 import axios from "axios";
 
+// ====================================================
+// 🔹 Ambil Tenant Access Token dari Lark
+// ====================================================
 export async function getTenantAccessToken() {
   try {
     const res = await axios.post(
@@ -10,31 +13,37 @@ export async function getTenantAccessToken() {
       },
       { timeout: 10000 }
     );
-    return res.data?.tenant_access_token;
+
+    const token = res.data?.tenant_access_token;
+    if (!token) throw new Error("Tidak bisa ambil tenant_access_token!");
+
+    return token;
   } catch (err) {
     console.error("❌ Gagal ambil tenant_access_token:", err.response?.data || err.message);
     throw err;
   }
 }
 
+// ====================================================
+// 🔹 Ambil Data dari Lark Base
+// ====================================================
 export async function getBaseData() {
   const token = await getTenantAccessToken();
   const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_APP_TOKEN}/tables/${process.env.LARK_TABLE_ID}/records`;
 
-  for (let i = 0; i < 3; i++) {
-    try {
-      const res = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000,
-      });
-      return res.data?.data?.items.map((r) => r.fields) || [];
-    } catch (err) {
-      if (i === 2) {
-        console.error("❌ Lark Base error (final):", err.response?.data || err.message);
-        throw err;
-      }
-      console.warn(`⚠️ Lark Base retry (${i + 1})...`);
-      await new Promise((r) => setTimeout(r, 800));
-    }
+  try {
+    const res = await axios.get(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000,
+    });
+
+    const records = res.data?.data?.items?.map((r) => r.fields) || [];
+    const columns = records.length ? Object.keys(records[0]) : [];
+
+    console.log(`✅ Berhasil ambil ${records.length} data dari Lark Base`);
+    return { columns, records };
+  } catch (err) {
+    console.error("❌ Gagal ambil data Lark Base:", err.response?.data || err.message);
+    return { columns: [], records: [] };
   }
 }

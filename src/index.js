@@ -49,19 +49,19 @@ app.post("/api/lark", async (req, res) => {
       return res.json({ challenge });
     }
 
-    console.log("📩 Event diterima:", header?.event_type);
-
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
 
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
+    const receiveId = messageObj.chat_id;
+    const receiveType = "chat_id";
+
     if (!userMessage) {
-      await sendMessage("chat_id", messageObj.chat_id, "⚠️ Pesan kosong, bro.");
+      await sendMessage(receiveType, receiveId, "⚠️ Pesan kosong, bro.");
       return res.status(200).send();
     }
 
-    const receiveId = messageObj.chat_id;
-    const receiveType = "chat_id";
+    console.log(`📩 Pesan user: ${userMessage}`);
 
     // ====================================================
     // 🔹 Ambil Data dari Lark Base
@@ -73,22 +73,21 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Buat Prompt ke Gemini
+    // 🔹 Buat Prompt Dynamic ke Gemini (Natural NLP)
     // ====================================================
     const prompt = `
-Kamu adalah asisten AI yang membantu user menelusuri data dari tabel Lark Base.
-Gunakan hanya data berikut ini:
+Kamu adalah asisten AI yang dapat membaca dan memahami data berbentuk JSON.
+Data berikut diambil dari Lark Base (maksimal 50 data pertama):
 
-Kolom: ${columns.join(", ")}
-Data contoh:
 ${JSON.stringify(records.slice(0, 50), null, 2)}
 
-User bertanya: "${userMessage}"
-
 Tugas kamu:
-1. Jawab berdasarkan data di atas (bukan dari pengetahuan umum).
-2. Jika tidak ada jawaban yang cocok, balas: "Data tidak ditemukan di tabel."
-3. Gunakan Bahasa Indonesia yang natural dan singkat.
+- Jawablah pertanyaan user berdasarkan data di atas.
+- Gunakan Bahasa Indonesia.
+- Jawaban harus dalam bentuk daftar ringkas jika ada lebih dari 1 hasil.
+- Jika tidak ada hasil yang cocok, katakan: "Tidak ditemukan data yang sesuai."
+
+User bertanya: "${userMessage}"
 
 Jawaban:
 `;
@@ -106,11 +105,7 @@ Jawaban:
 
     console.log("🤖 Jawaban Gemini:", reply);
 
-    // ====================================================
-    // 🔹 Kirim Jawaban ke Chat
-    // ====================================================
     await sendMessage(receiveType, receiveId, reply);
-
     res.status(200).send({ ok: true });
   } catch (err) {
     console.error("❌ Error webhook:", err.response?.data || err.message);
@@ -122,7 +117,7 @@ Jawaban:
 // 🔹 Default Route
 // ====================================================
 app.get("/", (req, res) => {
-  res.send("✅ Lark Bot + Gemini + Lark Base sudah jalan bro!");
+  res.send("✅ Lark Bot + Gemini + Lark Base sudah aktif bro!");
 });
 
 // ====================================================
@@ -131,11 +126,8 @@ app.get("/", (req, res) => {
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
-    console.log(`🚀 Server running di http://localhost:${PORT}`);
+    console.log(`🚀 Server jalan di http://localhost:${PORT}`);
   });
 }
 
-// ====================================================
-// 🔹 Export untuk Vercel
-// ====================================================
 export default app;

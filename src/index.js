@@ -1,6 +1,6 @@
 import express from "express";
 import lark from "@larksuiteoapi/node-sdk";
-import { getBaseData } from "./larbBse.js";
+import { getBaseData } from "./larkBase.js";
 
 const app = express();
 app.use(express.json());

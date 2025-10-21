@@ -24,17 +24,28 @@ const client = new lark.Client({
 // ====================================================
 async function askGemini(prompt) {
   try {
+    console.log("🔑 Gemini key:", process.env.GEMINI_KEY ? "Loaded" : "Missing");
+
     const res = await axios.post(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       { contents: [{ parts: [{ text: prompt }] }] },
-      { params: { key: process.env.GEMINI_KEY } }
+      {
+        params: { key: process.env.GEMINI_KEY },
+        timeout: 10000, // ✅ timeout 10 detik
+      }
     );
+
     return (
       res.data.candidates?.[0]?.content?.parts?.[0]?.text ||
       "⚠️ Tidak ada jawaban dari Gemini."
     );
   } catch (err) {
-    console.error("Gemini error:", err.response?.data || err.message);
+    console.error("Gemini error:", {
+      message: err.message,
+      code: err.code,
+      response: err.response?.status,
+      data: err.response?.data,
+    });
     return "⚠️ Terjadi error saat memanggil Gemini API.";
   }
 }
@@ -52,17 +63,18 @@ async function sendMessage(chatId, text) {
         content: JSON.stringify({ text }),
       },
     });
+    console.log("📩 Pesan terkirim ke Lark");
   } catch (err) {
-    console.error("Send message error:", err);
+    console.error("Send message error:", err.response?.data || err.message);
   }
 }
 
 // ====================================================
-// 🔹 AMBIL DATA DARI LARK BASE (FIXED VERSION)
+// 🔹 AMBIL DATA DARI LARK BASE
 // ====================================================
 async function getBaseData() {
   try {
-    const baseToken = process.env.LARK_BASE_TOKEN; // ✅ token langsung dari .env
+    const baseToken = process.env.LARK_BASE_TOKEN;
 
     const res = await axios.get(
       `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_APP_TOKEN}/tables/${process.env.LARK_TABLE_ID}/records`,
@@ -79,9 +91,7 @@ async function getBaseData() {
     if (records.length === 0) {
       console.log("⚠️ Tidak ada data di tabel Lark Base.");
     } else {
-      console.log(
-        `✅ Lark Base loaded: ${records.length} records, kolom: ${columns.join(", ")}`
-      );
+      console.log(`✅ Lark Base loaded: ${records.length} records`);
     }
 
     return { columns, records };
@@ -92,7 +102,7 @@ async function getBaseData() {
 }
 
 // ====================================================
-// 🔹 MODE: AI REASONING BERDASARKAN TABLE LARK BASE
+// 🔹 PROSES PESAN USER
 // ====================================================
 async function handleBaseQuery(userMessage) {
   try {
@@ -106,20 +116,20 @@ async function handleBaseQuery(userMessage) {
 Kamu adalah AI asisten yang menjawab pertanyaan user HANYA berdasarkan data tabel berikut.
 Jangan gunakan pengetahuan umum dari luar data ini.
 
-Nama kolom yang tersedia:
+Nama kolom:
 ${columns.join(", ")}
 
-Berikut contoh data tabel (maks 50 baris):
+Contoh data (maks 50 baris):
 ${JSON.stringify(records.slice(0, 50), null, 2)}
 
 Pertanyaan user:
 "${userMessage}"
 
-Tugas kamu:
+Tugas:
 1. Analisis data di atas.
 2. Jawab hanya jika datanya bisa ditemukan di tabel.
-3. Jika tidak ada jawaban yang sesuai, jawab: "Data tidak ditemukan di tabel."
-4. Jawab dengan ringkas tapi jelas, boleh dalam bentuk poin atau paragraf singkat.
+3. Jika tidak ada, jawab: "Data tidak ditemukan di tabel."
+4. Jawab singkat tapi jelas.
 
 Jawaban:
 `;
@@ -133,15 +143,24 @@ Jawaban:
 }
 
 // ====================================================
-// 🔹 LARK WEBHOOK
+// 🔹 WEBHOOK LARK (NON-BLOCKING)
 // ====================================================
 app.post("/api/lark", async (req, res) => {
   const body = req.body;
-  if (body.type === "url_verification")
+
+  // ✅ handle verification
+  if (body.type === "url_verification") {
     return res.json({ challenge: body.challenge });
+  }
 
-  res.status(200).send(); // agar tidak timeout
+  // ✅ langsung kirim response biar Vercel nggak timeout
+  res.status(200).send();
 
+  // Jalankan worker async
+  processWebhook(body);
+});
+
+async function processWebhook(body) {
   try {
     const event = body?.event;
     if (!event?.message) return;
@@ -159,17 +178,17 @@ app.post("/api/lark", async (req, res) => {
   } catch (err) {
     console.error("Webhook error:", err);
   }
-});
+}
 
 // ====================================================
 // 🔹 DEFAULT ROUTE
 // ====================================================
-app.get("/", (req, res) =>
-  res.send("✅ Lark Bot + Gemini + Lark Base + Firestore is running!")
-);
+app.get("/", (req, res) => {
+  res.send("✅ Lark Bot + Gemini + Lark Base + Firestore is running!");
+});
 
 // ====================================================
-// 🔹 JALANKAN SERVER (untuk lokal)
+// 🔹 RUN LOCAL ONLY
 // ====================================================
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3000;
@@ -179,6 +198,6 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 // ====================================================
-// 🔹 EXPORT (untuk Vercel)
+// 🔹 EXPORT UNTUK VERCEL
 // ====================================================
 export default app;

@@ -53,13 +53,15 @@ app.post("/api/lark", async (req, res) => {
       return res.json({ challenge });
     }
 
-    // 🚫 Cegah looping pesan (bot balas dirinya sendiri / app)
-    const senderType = event?.sender?.sender_type;
-    const senderId = event?.sender?.sender_id?.open_id;
-    const botAppId = process.env.LARK_APP_ID;
+    // ✅ Hanya proses event dari im.message.receive_v1
+    if (header?.event_type !== "im.message.receive_v1") {
+      console.log(`ℹ️ Dilewati event: ${header?.event_type}`);
+      return res.status(200).send();
+    }
 
-    if (senderType === "bot" || senderType === "app" || senderId === botAppId) {
-      console.log("🚫 Pesan dari bot sendiri atau app, diabaikan.");
+    // 🧠 Cegah bot balas pesan sendiri
+    if (event?.sender?.sender_type === "bot") {
+      console.log("🚫 Pesan dari bot sendiri, diabaikan.");
       return res.status(200).send();
     }
 

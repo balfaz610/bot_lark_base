@@ -9,6 +9,7 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+
 app.get("/", (req, res) => {
   res.status(200).send("✅ Bot Lark Base aktif, bro!");
 });
@@ -56,16 +57,13 @@ app.post("/api/lark", async (req, res) => {
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
 
-    // ✅ Tambahkan ini biar Lark gak looping (penting banget)
-    res.status(200).send("ok");
-
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
     const receiveType = "chat_id";
 
     if (!userMessage) {
       await sendMessage(receiveType, receiveId, "⚠️ Pesan kosong, bro.");
-      return;
+      return res.status(200).send();
     }
 
     // ====================================================
@@ -74,7 +72,7 @@ app.post("/api/lark", async (req, res) => {
     const { columns, records } = await getBaseData();
     if (records.length === 0) {
       await sendMessage(receiveType, receiveId, "⚠️ Tidak ada data di tabel Lark Base.");
-      return;
+      return res.status(200).send();
     }
 
     // ====================================================
@@ -105,6 +103,7 @@ Gunakan bahasa Indonesia alami dan santai.
       "⚠️ Tidak ada respons dari Gemini.";
 
     await sendMessage(receiveType, receiveId, reply);
+    res.status(200).send({ ok: true });
   } catch (err) {
     console.error("❌ Error webhook:", err.response?.data || err.message);
     res.status(500).send({ error: err.message });

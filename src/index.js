@@ -45,13 +45,13 @@ async function sendMessage(receiveType, receiveId, text) {
 }
 
 // ====================================================
-// 🔹 Webhook Handler
+// 🔹 Webhook Handler (fix looping)
 // ====================================================
 app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // ✅ Verifikasi Webhook URL
+    // ✅ Verifikasi URL dari Lark
     if (type === "url_verification") {
       return res.json({ challenge });
     }
@@ -59,13 +59,14 @@ app.post("/api/lark", async (req, res) => {
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
 
-    // 🧾 Logging pengirim (user atau bot)
-    console.log("Pesan dari:", event?.sender?.sender_type);
+    // 🧾 Log sender info
+    console.log("👤 Sender Type:", event?.sender?.sender_type);
 
-    // 🧠 Cegah bot balas dirinya sendiri (anti-looping)
-    if (event?.sender?.sender_type === "bot") {
-      console.log("🛑 Pesan dari bot sendiri diabaikan");
-      return res.status(200).send();
+    // 🧠 Anti-looping fix:
+    // Bot kirim pesan => sender_type = "app"
+    if (event?.sender?.sender_type === "app") {
+      console.log("🛑 Pesan dari bot sendiri diabaikan (anti-loop)");
+      return res.status(200).send("ignored");
     }
 
     // 🔹 Ambil isi pesan dari user
@@ -88,7 +89,7 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt Dinamis (biar NLP bebas)
+    // 🔹 Prompt Dinamis (NLP bebas)
     // ====================================================
     const prompt = `
 Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:

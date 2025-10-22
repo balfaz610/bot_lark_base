@@ -9,11 +9,6 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-
-app.get("/", (req, res) => {
-  res.status(200).send("✅ Bot Lark Base aktif, bro!");
-});
-
 // ====================================================
 // 🔹 LARK CLIENT
 // ====================================================
@@ -49,13 +44,20 @@ app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // ✅ Validasi URL Webhook
+    // ✅ URL Verification
     if (type === "url_verification") {
       return res.json({ challenge });
     }
 
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
+
+    // 🚫 Cegah looping — kalau pesan dikirim oleh bot sendiri, stop.
+    const senderType = event?.sender?.sender_type;
+    if (senderType === "app") {
+      console.log("⏹ Pesan dari bot sendiri — diabaikan.");
+      return res.status(200).send();
+    }
 
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
@@ -76,7 +78,7 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt dinamis (biar NLP bebas)
+    // 🔹 Prompt untuk Gemini
     // ====================================================
     const prompt = `
 Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:

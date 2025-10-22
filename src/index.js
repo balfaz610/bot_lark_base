@@ -39,57 +39,61 @@ async function sendMessage(receiveType, receiveId, text) {
         content: JSON.stringify({ text }),
       },
     });
+    console.log(`📩 Pesan terkirim ke ${receiveType}: ${receiveId}`);
   } catch (err) {
     console.error("❌ Gagal kirim pesan:", err.response?.data || err.message);
   }
 }
 
 // ====================================================
-// 🔹 Webhook Handler (fix looping)
+// 🔹 Webhook Handler (Anti-looping + Safety)
 // ====================================================
 app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // ✅ Verifikasi URL dari Lark
+    // ✅ Verifikasi webhook (dari Lark)
     if (type === "url_verification") {
+      console.log("🔗 Verifikasi URL Lark OK!");
       return res.json({ challenge });
     }
 
-    const messageObj = event?.message;
-    if (!messageObj) return res.status(200).send();
-
-    // 🧾 Log sender info
-    console.log("👤 Sender Type:", event?.sender?.sender_type);
-
-    // 🧠 Anti-looping fix:
-    // Bot kirim pesan => sender_type = "app"
-    if (event?.sender?.sender_type === "app") {
-      console.log("🛑 Pesan dari bot sendiri diabaikan (anti-loop)");
+    // ✅ Pastikan event adalah pesan
+    if (!event || !event.message) {
+      console.log("⚠️ Event bukan pesan, dilewati.");
       return res.status(200).send("ignored");
     }
 
-    // 🔹 Ambil isi pesan dari user
+    // 🧠 Anti-looping: skip kalau pengirim adalah bot sendiri
+    if (event?.sender?.sender_type === "app") {
+      console.log("🛑 Pesan dari bot sendiri diabaikan (anti-loop).");
+      return res.status(200).send("ignored");
+    }
+
+    // 🔹 Ambil pesan user
+    const messageObj = event.message;
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
     const receiveType = "chat_id";
 
     if (!userMessage) {
       await sendMessage(receiveType, receiveId, "⚠️ Pesan kosong, bro.");
-      return res.status(200).send();
+      return res.status(200).send("no message");
     }
+
+    console.log("💬 Pesan diterima dari user:", userMessage);
 
     // ====================================================
     // 🔹 Ambil Data dari Lark Base
     // ====================================================
     const { columns, records } = await getBaseData();
-    if (records.length === 0) {
+    if (!records || records.length === 0) {
       await sendMessage(receiveType, receiveId, "⚠️ Tidak ada data di tabel Lark Base.");
-      return res.status(200).send();
+      return res.status(200).send("no data");
     }
 
     // ====================================================
-    // 🔹 Prompt Dinamis (NLP bebas)
+    // 🔹 Prompt Dinamis (tanpa template kaku)
     // ====================================================
     const prompt = `
 Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
@@ -106,16 +110,22 @@ Gunakan bahasa Indonesia alami dan santai.
     // ====================================================
     // 🔹 Kirim ke Gemini API
     // ====================================================
-    const geminiRes = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
-      { contents: [{ parts: [{ text: prompt }] }] }
-    );
+    const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_KEY}`;
+
+    const geminiRes = await axios.post(url, {
+      contents: [{ parts: [{ text: prompt }] }],
+    });
 
     const reply =
       geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "⚠️ Tidak ada respons dari Gemini.";
 
+    console.log("🤖 Balasan Gemini:", reply);
+
+    // ====================================================
     // 🔹 Kirim Balasan ke Chat Lark
+    // ====================================================
     await sendMessage(receiveType, receiveId, reply);
 
     res.status(200).send({ ok: true });

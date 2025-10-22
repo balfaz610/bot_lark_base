@@ -9,7 +9,6 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-
 app.get("/", (req, res) => {
   res.status(200).send("✅ Bot Lark Base aktif, bro!");
 });
@@ -53,12 +52,17 @@ app.post("/api/lark", async (req, res) => {
     if (type === "url_verification") {
       return res.json({ challenge });
     }
-    
-    // 🧠 Tambahin baris ini buat cegah looping
-    if (event?.sender?.sender_type === "bot") {
-      console.log("🚫 Pesan dari bot sendiri, diabaikan.");
+
+    // 🚫 Cegah looping pesan (bot balas dirinya sendiri / app)
+    const senderType = event?.sender?.sender_type;
+    const senderId = event?.sender?.sender_id?.open_id;
+    const botAppId = process.env.LARK_APP_ID;
+
+    if (senderType === "bot" || senderType === "app" || senderId === botAppId) {
+      console.log("🚫 Pesan dari bot sendiri atau app, diabaikan.");
       return res.status(200).send();
     }
+
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
 

@@ -1,8 +1,18 @@
 import axios from "axios";
 
-export async function getBaseData() {
+// Cache token supaya gak minta ulang ke Lark tiap pesan
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getTenantToken() {
+  const now = Date.now();
+
+  // Gunakan token cached kalau masih valid
+  if (cachedToken && now < tokenExpiry) {
+    return cachedToken;
+  }
+
   try {
-    // 🔹 Ambil tenant access token dari Lark API
     const authRes = await axios.post(
       "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal",
       {
@@ -11,11 +21,22 @@ export async function getBaseData() {
       }
     );
 
-    const tenantToken = authRes.data.tenant_access_token;
+    cachedToken = authRes.data.tenant_access_token;
+    tokenExpiry = now + 1000 * 7100; // Berlaku ±1 jam 58 menit
 
-    // 🔹 Ambil data dari tabel Lark Base
+    return cachedToken;
+  } catch (err) {
+    console.error("❌ Gagal ambil tenant token:", err.response?.data || err.message);
+    throw new Error("Gagal ambil tenant token");
+  }
+}
+
+export async function getBaseData(limit = 50) {
+  try {
+    const tenantToken = await getTenantToken();
+
     const res = await axios.get(
-      `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_APP_TOKEN}/tables/${process.env.LARK_TABLE_ID}/records`,
+      `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_APP_TOKEN}/tables/${process.env.LARK_TABLE_ID}/records?page_size=${limit}`,
       {
         headers: {
           Authorization: `Bearer ${tenantToken}`,

@@ -9,8 +9,12 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-// Simpan message_id yang sudah diproses
-const processedMessages = new Set();
+// ====================================================
+// 🔹 TEST ROUTE
+// ====================================================
+app.get("/", (req, res) => {
+  res.status(200).send("✅ Bot Lark Base aktif, bro!");
+});
 
 // ====================================================
 // 🔹 LARK CLIENT
@@ -22,12 +26,8 @@ const client = new lark.Client({
   domain: lark.Domain.Lark,
 });
 
-app.get("/", (req, res) => {
-  res.status(200).send("✅ Bot Lark aktif bro!");
-});
-
 // ====================================================
-// 🔹 Kirim pesan balasan
+// 🔹 Kirim Pesan Balasan ke Lark
 // ====================================================
 async function sendMessage(receiveType, receiveId, text) {
   try {
@@ -51,34 +51,20 @@ app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // 🔹 Verifikasi URL
+    // ✅ Verifikasi webhook
     if (type === "url_verification") {
       return res.json({ challenge });
     }
 
-    // 🔹 Hanya proses event pesan
-    if (header?.event_type !== "im.message.receive_v1") {
-      return res.status(200).send();
-    }
-
-    const messageId = event?.message?.message_id;
-    if (!messageId) return res.status(200).send();
-
-    // 🚫 Cegah duplikat (jika message_id sudah pernah diproses)
-    if (processedMessages.has(messageId)) {
-      console.log("⏩ Pesan sudah diproses sebelumnya, dilewati:", messageId);
-      return res.status(200).send();
-    }
-    processedMessages.add(messageId);
-
-    // 🚫 Jangan balas pesan dari bot sendiri
+    // 🚫 Cegah loop: abaikan pesan dari bot sendiri
     if (event?.sender?.sender_type === "bot") {
-      console.log("🚫 Pesan dari bot sendiri, dilewati.");
+      console.log("🚫 Pesan dari bot sendiri diabaikan.");
       return res.status(200).send();
     }
 
-    // Ambil isi pesan
-    const messageObj = event.message;
+    const messageObj = event?.message;
+    if (!messageObj) return res.status(200).send();
+
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
     const receiveType = "chat_id";
@@ -98,53 +84,49 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt ke Gemini
+    // 🔹 Prompt ke Gemini (gunakan format fix agar 1x balas)
     // ====================================================
     const prompt = `
-Kamu adalah asisten yang menjawab berdasarkan data tabel berikut:
-Kolom: ${columns.join(", ")}
-Data contoh:
-${JSON.stringify(records.slice(0, 20), null, 2)}
+Kamu adalah asisten AI yang menjawab hanya berdasarkan data ini.
+Jika pertanyaan tidak relevan dengan kolom ${columns.join(", ")}, jawab singkat: "Data tidak ditemukan di tabel."
+Berikan jawaban yang ringkas dan hanya satu kali tanpa pengulangan.
 
-User bertanya: "${userMessage}"
-Jawablah berdasarkan data di atas.
-Jika tidak relevan, jawab: "Data tidak ditemukan di tabel."
-Gunakan bahasa Indonesia santai.
+Data contoh (maks 30):
+${JSON.stringify(records.slice(0, 30), null, 2)}
+
+Pertanyaan user:
+"${userMessage}"
 `;
 
-    // ====================================================
     // 🔹 Kirim ke Gemini API
-    // ====================================================
     const geminiRes = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
       { contents: [{ parts: [{ text: prompt }] }] }
     );
 
-    let reply =
+    const reply =
       geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "⚠️ Tidak ada respons dari Gemini.";
-
-    reply = reply
-      .replace(/```[\s\S]*?```/g, "")
-      .split(/Oke,|oke,|Baik,|baik,/i)[0]
-      .trim();
-
-    if (!reply) reply = "⚠️ Tidak ada jawaban relevan dari Gemini.";
 
     await sendMessage(receiveType, receiveId, reply);
     res.status(200).send({ ok: true });
   } catch (err) {
-    console.error("❌ Error di webhook:", err.response?.data || err.message);
+    console.error("❌ Error webhook:", err.response?.data || err.message);
     res.status(500).send({ error: err.message });
   }
 });
 
 // ====================================================
-// 🔹 Jalankan lokal
+// 🔹 Jalankan Lokal
 // ====================================================
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => console.log(`🚀 Server jalan di http://localhost:${PORT}`));
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running di http://localhost:${PORT}`);
+  });
 }
 
+// ====================================================
+// 🔹 Export untuk Vercel
+// ====================================================
 export default app;

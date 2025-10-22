@@ -9,9 +9,7 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-// ====================================================
-// 🔹 TEST ROUTE
-// ====================================================
+
 app.get("/", (req, res) => {
   res.status(200).send("✅ Bot Lark Base aktif, bro!");
 });
@@ -51,15 +49,9 @@ app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // ✅ Verifikasi webhook
+    // ✅ Validasi URL Webhook
     if (type === "url_verification") {
       return res.json({ challenge });
-    }
-
-    // 🚫 Cegah loop: abaikan pesan dari bot sendiri
-    if (event?.sender?.sender_type === "bot") {
-      console.log("🚫 Pesan dari bot sendiri diabaikan.");
-      return res.status(200).send();
     }
 
     const messageObj = event?.message;
@@ -84,21 +76,23 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt ke Gemini (gunakan format fix agar 1x balas)
+    // 🔹 Prompt dinamis (biar NLP bebas)
     // ====================================================
     const prompt = `
-Kamu adalah asisten AI yang menjawab hanya berdasarkan data ini.
-Jika pertanyaan tidak relevan dengan kolom ${columns.join(", ")}, jawab singkat: "Data tidak ditemukan di tabel."
-Berikan jawaban yang ringkas dan hanya satu kali tanpa pengulangan.
-
-Data contoh (maks 30):
+Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
+Kolom: ${columns.join(", ")}
+Data (maks 30 contoh):
 ${JSON.stringify(records.slice(0, 30), null, 2)}
 
-Pertanyaan user:
-"${userMessage}"
+User bertanya: "${userMessage}"
+Jawablah berdasarkan data di atas. 
+Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
+Gunakan bahasa Indonesia alami dan santai.
 `;
 
+    // ====================================================
     // 🔹 Kirim ke Gemini API
+    // ====================================================
     const geminiRes = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
       { contents: [{ parts: [{ text: prompt }] }] }

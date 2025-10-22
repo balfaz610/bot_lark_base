@@ -3,7 +3,7 @@ import axios from "axios";
 import lark from "@larksuiteoapi/node-sdk";
 import dotenv from "dotenv";
 import { getBaseData } from "./utils/larkBase.js";
-import { saveMessage } from "./utils/db.js"; // opsional, kalau mau log ke Firestore
+import { saveMessage } from "./db.js"; // opsional, kalau mau log ke Firestore
 
 dotenv.config();
 

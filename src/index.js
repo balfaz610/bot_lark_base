@@ -10,6 +10,13 @@ const app = express();
 app.use(express.json());
 
 // ====================================================
+// 🔹 Endpoint Tes
+// ====================================================
+app.get("/", (req, res) => {
+  res.status(200).send("✅ Bot Lark Base aktif, bro!");
+});
+
+// ====================================================
 // 🔹 LARK CLIENT
 // ====================================================
 const client = new lark.Client({
@@ -19,22 +26,8 @@ const client = new lark.Client({
   domain: lark.Domain.Lark,
 });
 
-// Simpan ID bot (biar bisa tahu kalau pengirim = bot sendiri)
-let botUserId = null;
-(async () => {
-  try {
-    const res = await client.contact.user.get({
-      user_id: "me",
-    });
-    botUserId = res.data.user.user_id;
-    console.log("🤖 Bot User ID:", botUserId);
-  } catch (err) {
-    console.error("⚠️ Gagal ambil bot user ID:", err.response?.data || err.message);
-  }
-})();
-
 // ====================================================
-// 🔹 Kirim Pesan Balasan ke Lark
+// 🔹 Fungsi Kirim Pesan ke Lark
 // ====================================================
 async function sendMessage(receiveType, receiveId, text) {
   try {
@@ -56,9 +49,9 @@ async function sendMessage(receiveType, receiveId, text) {
 // ====================================================
 app.post("/api/lark", async (req, res) => {
   try {
-    const { type, event, challenge } = req.body;
+    const { header, event, type, challenge } = req.body;
 
-    // ✅ URL verification
+    // ✅ Verifikasi Webhook URL
     if (type === "url_verification") {
       return res.json({ challenge });
     }
@@ -66,25 +59,16 @@ app.post("/api/lark", async (req, res) => {
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
 
-    // ====================================================
-    // 🚫 Cegah looping — abaikan pesan dari bot sendiri
-    // ====================================================
-    const senderType = event?.sender?.sender_type;
-    const senderId = event?.sender?.sender_id?.user_id;
+    // 🧾 Logging pengirim (user atau bot)
+    console.log("Pesan dari:", event?.sender?.sender_type);
 
-    if (senderType === "app") {
-      console.log("⏹ Diabaikan: Pesan dikirim oleh bot (sender_type = app)");
+    // 🧠 Cegah bot balas dirinya sendiri (anti-looping)
+    if (event?.sender?.sender_type === "bot") {
+      console.log("🛑 Pesan dari bot sendiri diabaikan");
       return res.status(200).send();
     }
 
-    if (botUserId && senderId === botUserId) {
-      console.log("⏹ Diabaikan: Pesan dikirim oleh bot sendiri (user_id cocok).");
-      return res.status(200).send();
-    }
-
-    // ====================================================
-    // 🔹 Proses pesan user
-    // ====================================================
+    // 🔹 Ambil isi pesan dari user
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
     const receiveType = "chat_id";
@@ -95,7 +79,7 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Ambil data dari Lark Base
+    // 🔹 Ambil Data dari Lark Base
     // ====================================================
     const { columns, records } = await getBaseData();
     if (records.length === 0) {
@@ -104,7 +88,7 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt untuk Gemini
+    // 🔹 Prompt Dinamis (biar NLP bebas)
     // ====================================================
     const prompt = `
 Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
@@ -113,7 +97,7 @@ Data (maks 30 contoh):
 ${JSON.stringify(records.slice(0, 30), null, 2)}
 
 User bertanya: "${userMessage}"
-Jawablah berdasarkan data di atas. 
+Jawablah berdasarkan data di atas.
 Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
 Gunakan bahasa Indonesia alami dan santai.
 `;
@@ -130,7 +114,9 @@ Gunakan bahasa Indonesia alami dan santai.
       geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "⚠️ Tidak ada respons dari Gemini.";
 
+    // 🔹 Kirim Balasan ke Chat Lark
     await sendMessage(receiveType, receiveId, reply);
+
     res.status(200).send({ ok: true });
   } catch (err) {
     console.error("❌ Error webhook:", err.response?.data || err.message);

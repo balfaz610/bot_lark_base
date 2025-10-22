@@ -109,9 +109,20 @@ Gunakan bahasa Indonesia alami dan santai.
       { contents: [{ parts: [{ text: prompt }] }] }
     );
 
-    const reply =
+    // ====================================================
+    // 🔹 Ambil dan bersihkan jawaban Gemini
+    // ====================================================
+    let reply =
       geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "⚠️ Tidak ada respons dari Gemini.";
+
+    // 🧹 Bersihkan duplikasi, JSON, dan block markdown
+    reply = reply
+      .replace(/```[\s\S]*?```/g, "") // hapus blok kode markdown
+      .split(/Oke,|oke,|Baik,|baik,/i)[0] // ambil bagian awal sebelum Gemini mulai ngulang
+      .trim();
+
+    if (!reply) reply = "⚠️ Tidak ada jawaban yang relevan dari Gemini.";
 
     await sendMessage(receiveType, receiveId, reply);
     res.status(200).send({ ok: true });

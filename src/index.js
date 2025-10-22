@@ -9,9 +9,6 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-// ====================================================
-// 🔹 Root route
-// ====================================================
 app.get("/", (req, res) => {
   res.status(200).send("✅ Bot Lark Base aktif, bro!");
 });
@@ -27,16 +24,7 @@ const client = new lark.Client({
 });
 
 // ====================================================
-// 🔹 Cache untuk anti-duplikat event
-// ====================================================
-const processedMessages = new Set();
-const MESSAGE_CACHE_TIMEOUT = 5 * 60 * 1000; // 5 menit
-
-// Bersihkan cache tiap 5 menit biar gak numpuk
-setInterval(() => processedMessages.clear(), MESSAGE_CACHE_TIMEOUT);
-
-// ====================================================
-// 🔹 Fungsi Kirim Pesan ke Lark
+// 🔹 Kirim Pesan Balasan ke Lark
 // ====================================================
 async function sendMessage(receiveType, receiveId, text) {
   try {
@@ -60,24 +48,15 @@ app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // ✅ Validasi URL Webhook (saat setup)
+    // ✅ Validasi URL Webhook
     if (type === "url_verification") {
       return res.json({ challenge });
     }
 
     const messageObj = event?.message;
-    if (!messageObj) return res.status(200).send("ok");
+    if (!messageObj) return res.status(200).send();
 
-    const messageId = messageObj.message_id;
-
-    // 🧠 Cek duplikat event (Lark kadang retry event yang sama)
-    if (processedMessages.has(messageId)) {
-      console.log(`⚠️ Duplikat event diabaikan: ${messageId}`);
-      return res.status(200).send("duplicate ignored");
-    }
-    processedMessages.add(messageId);
-
-    // ✅ Balas cepat ke Lark supaya gak retry
+    // ✅ Tambahkan ini biar Lark gak looping (penting banget)
     res.status(200).send("ok");
 
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
@@ -99,7 +78,7 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt untuk Gemini
+    // 🔹 Prompt dinamis (biar NLP bebas)
     // ====================================================
     const prompt = `
 Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
@@ -108,7 +87,7 @@ Data (maks 30 contoh):
 ${JSON.stringify(records.slice(0, 30), null, 2)}
 
 User bertanya: "${userMessage}"
-Jawablah berdasarkan data di atas.
+Jawablah berdasarkan data di atas. 
 Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
 Gunakan bahasa Indonesia alami dan santai.
 `;
@@ -128,6 +107,7 @@ Gunakan bahasa Indonesia alami dan santai.
     await sendMessage(receiveType, receiveId, reply);
   } catch (err) {
     console.error("❌ Error webhook:", err.response?.data || err.message);
+    res.status(500).send({ error: err.message });
   }
 });
 

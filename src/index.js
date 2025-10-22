@@ -19,6 +19,20 @@ const client = new lark.Client({
   domain: lark.Domain.Lark,
 });
 
+// Simpan ID bot (biar bisa tahu kalau pengirim = bot sendiri)
+let botUserId = null;
+(async () => {
+  try {
+    const res = await client.contact.user.get({
+      user_id: "me",
+    });
+    botUserId = res.data.user.user_id;
+    console.log("🤖 Bot User ID:", botUserId);
+  } catch (err) {
+    console.error("⚠️ Gagal ambil bot user ID:", err.response?.data || err.message);
+  }
+})();
+
 // ====================================================
 // 🔹 Kirim Pesan Balasan ke Lark
 // ====================================================
@@ -42,9 +56,9 @@ async function sendMessage(receiveType, receiveId, text) {
 // ====================================================
 app.post("/api/lark", async (req, res) => {
   try {
-    const { header, event, type, challenge } = req.body;
+    const { type, event, challenge } = req.body;
 
-    // ✅ URL Verification
+    // ✅ URL verification
     if (type === "url_verification") {
       return res.json({ challenge });
     }
@@ -52,13 +66,25 @@ app.post("/api/lark", async (req, res) => {
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
 
-    // 🚫 Cegah looping — kalau pesan dikirim oleh bot sendiri, stop.
+    // ====================================================
+    // 🚫 Cegah looping — abaikan pesan dari bot sendiri
+    // ====================================================
     const senderType = event?.sender?.sender_type;
+    const senderId = event?.sender?.sender_id?.user_id;
+
     if (senderType === "app") {
-      console.log("⏹ Pesan dari bot sendiri — diabaikan.");
+      console.log("⏹ Diabaikan: Pesan dikirim oleh bot (sender_type = app)");
       return res.status(200).send();
     }
 
+    if (botUserId && senderId === botUserId) {
+      console.log("⏹ Diabaikan: Pesan dikirim oleh bot sendiri (user_id cocok).");
+      return res.status(200).send();
+    }
+
+    // ====================================================
+    // 🔹 Proses pesan user
+    // ====================================================
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
     const receiveType = "chat_id";

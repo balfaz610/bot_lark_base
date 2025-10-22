@@ -3,19 +3,15 @@ import axios from "axios";
 import lark from "@larksuiteoapi/node-sdk";
 import dotenv from "dotenv";
 import { getBaseData } from "./utils/larkBase.js";
-import { saveMessage } from "./db.js"; // opsional, kalau mau log ke Firestore
+import { saveMessage, getMessages } from "./db.js";
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-// In-memory cache untuk deteksi duplikasi event (anti double reply)
-const processedEventIds = new Set();
-
-app.get("/", (req, res) => {
-  res.status(200).send("✅ Bot Lark Base aktif, bro!");
-});
+// Cache untuk debounce
+const messageCache = new Map();
 
 // ====================================================
 // 🔹 LARK CLIENT
@@ -30,9 +26,9 @@ const client = new lark.Client({
 // ====================================================
 // 🔹 Kirim Pesan Balasan ke Lark
 // ====================================================
-async function sendMessage(receiveType, receiveId, text) {
+async function sendMessage(receiveType, receiveId, text, messageId) {
   try {
-    await client.im.message.create({
+    const response = await client.im.message.create({
       params: { receive_id_type: receiveType },
       data: {
         receive_id: receiveId,
@@ -40,8 +36,13 @@ async function sendMessage(receiveType, receiveId, text) {
         content: JSON.stringify({ text }),
       },
     });
+    console.log(`✅ Pesan terkirim ke ${receiveId}: ${text}`);
+    // Simpan pesan ke Firestore
+    await saveMessage(receiveId, text, text, messageId);
+    return response;
   } catch (err) {
     console.error("❌ Gagal kirim pesan:", err.response?.data || err.message);
+    throw err;
   }
 }
 
@@ -51,105 +52,95 @@ async function sendMessage(receiveType, receiveId, text) {
 app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
+    console.log("📥 Event diterima:", JSON.stringify(event, null, 2));
 
     // ✅ Validasi URL Webhook
     if (type === "url_verification") {
+      console.log("✅ URL verification, challenge:", challenge);
       return res.json({ challenge });
     }
 
-    // ✅ Anti-loop: abaikan pesan dari bot sendiri
-    if (event?.sender?.sender_type === "bot") {
-      console.log("🤖 Abaikan pesan dari bot sendiri");
-      return res.status(200).send();
-    }
-
-    // ✅ Anti-duplikasi: cek event_id
-    const eventId = header?.event_id;
-    if (processedEventIds.has(eventId)) {
-      console.log("⏩ Event duplikat, di-skip:", eventId);
-      return res.status(200).send();
-    }
-    processedEventIds.add(eventId);
-
-    // Bersihkan cache event_id lama (biar gak numpuk)
-    if (processedEventIds.size > 1000) {
-      const first = processedEventIds.values().next().value;
-      processedEventIds.delete(first);
-    }
-
     const messageObj = event?.message;
-    if (!messageObj) return res.status(200).send();
-
-    // ✅ Parse pesan text
-    let userMessage = "";
-    try {
-      userMessage = JSON.parse(messageObj.content)?.text?.trim();
-    } catch {
-      console.warn("⚠️ Pesan non-text, dilewati");
+    if (!messageObj) {
+      console.log("⚠️ Tidak ada messageObj di event");
       return res.status(200).send();
     }
 
+    // 🔹 Filter pesan dari bot sendiri
+    const sender = event?.sender;
+    if (sender?.sender_type === "bot" || sender?.sender_id?.open_id === process.env.LARK_BOT_ID) {
+      console.log("⚠️ Skip pesan dari bot sendiri, sender_id:", sender?.sender_id?.open_id);
+      return res.status(200).send();
+    }
+
+    // 🔹 Cek tipe chat (grup atau P2P)
+    const chatType = messageObj.chat_type;
+    if (!["group", "p2p"].includes(chatType)) {
+      console.log("⚠️ Chat type tidak valid:", chatType);
+      return res.status(200).send();
+    }
+
+    // 🔹 Cek duplikat pesan
+    const messageId = messageObj.message_id;
+    const cacheKey = `${messageObj.chat_id}:${messageId}`;
+    if (messageCache.has(cacheKey)) {
+      console.log("⚠️ Skip pesan duplikat, message_id:", messageId);
+      return res.status(200).send();
+    }
+    messageCache.set(cacheKey, Date.now());
+    // Hapus cache setelah 5 menit
+    setTimeout(() => messageCache.delete(cacheKey), 5 * 60 * 1000);
+
+    // 🔹 Cek riwayat di Firestore
+    const prevMessages = await getMessages(messageObj.chat_id);
+    if (prevMessages.some((msg) => msg.messageId === messageId)) {
+      console.log("⚠️ Pesan sudah diproses sebelumnya, message_id:", messageId);
+      return res.status(200).send();
+    }
+
+    const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
     const receiveType = "chat_id";
 
     if (!userMessage) {
-      await sendMessage(receiveType, receiveId, "⚠️ Pesan kosong, bro.");
+      console.log("⚠️ Pesan kosong dari user");
+      await sendMessage(receiveType, receiveId, "⚠️ Pesan kosong, bro.", messageId);
       return res.status(200).send();
     }
 
-    // ====================================================
     // 🔹 Ambil data dari Lark Base
-    // ====================================================
     const { columns, records } = await getBaseData();
     if (records.length === 0) {
-      await sendMessage(receiveType, receiveId, "⚠️ Tidak ada data di tabel Lark Base.");
+      console.log("⚠️ Tidak ada data di Lark Base");
+      await sendMessage(receiveType, receiveId, "⚠️ Tidak ada data di tabel Lark Base.", messageId);
       return res.status(200).send();
     }
 
-    // ====================================================
     // 🔹 Prompt dinamis
-    // ====================================================
     const prompt = `
-Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
+Kamu adalah AI asisten yang HANYA menjawab berdasarkan data berikut:
 Kolom: ${columns.join(", ")}
-Data (maks 20 contoh):
-${JSON.stringify(records.slice(0, 20), null, 2)}
+Data (maks 30 contoh):
+${JSON.stringify(records.slice(0, 30), null, 2)}
 
 User bertanya: "${userMessage}"
-Jawablah berdasarkan data di atas. 
-Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
+Jawab HANYA berdasarkan data di atas. Jika tidak relevan, jawab: "Data tidak ditemukan di tabel." Jangan tambah info lain.
 Gunakan bahasa Indonesia alami dan santai.
 `;
 
-    // ====================================================
     // 🔹 Kirim ke Gemini API
-    // ====================================================
-    let reply;
-    try {
-      const geminiRes = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
-        { contents: [{ parts: [{ text: prompt }] }] }
-      );
-      reply =
-        geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "⚠️ Tidak ada respons dari Gemini.";
-    } catch (err) {
-      console.error("❌ Gagal ke Gemini:", err.response?.data || err.message);
-      reply = "⚠️ Maaf bro, server AI lagi error. Coba lagi nanti ya 🙏";
-    }
+    console.log("📤 Mengirim prompt ke Gemini:", prompt);
+    const geminiRes = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_KEY}`,
+      { contents: [{ parts: [{ text: prompt }] }] }
+    );
 
-    // ====================================================
-    // 🔹 Kirim Balasan ke User
-    // ====================================================
-    await sendMessage(receiveType, receiveId, reply);
+    const reply =
+      geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "⚠️ Tidak ada respons dari Gemini.";
+    console.log("📥 Respons Gemini:", reply);
 
-    // (Opsional) Simpan log ke Firestore
-    try {
-      await saveMessage(receiveId, userMessage, reply);
-    } catch (e) {
-      console.warn("⚠️ Gagal simpan log chat:", e.message);
-    }
-
+    await sendMessage(receiveType, receiveId, reply, messageId);
     res.status(200).send({ ok: true });
   } catch (err) {
     console.error("❌ Error webhook:", err.response?.data || err.message);

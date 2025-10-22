@@ -9,12 +9,10 @@ let serviceAccount;
 
 try {
   if (process.env.FIREBASE_KEY_BASE64) {
-    // ✅ Di Vercel: ambil dari environment variable Base64
     const decoded = Buffer.from(process.env.FIREBASE_KEY_BASE64, "base64").toString("utf8");
     serviceAccount = JSON.parse(decoded);
     console.log("✅ Firebase key loaded from Base64 ENV");
   } else {
-    // ✅ Di lokal: baca dari file firebase-key.json
     const firebaseConfigPath =
       process.env.FIREBASE_CONFIG_PATH || path.join(__dirname, "..", "firebase-key.json");
 
@@ -38,14 +36,15 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 // -------------------- FUNCTIONS --------------------
-export async function saveMessage(sessionId, question, answer) {
+export async function saveMessage(sessionId, question, answer, messageId) {
   await db.collection("messages").add({
     sessionId,
     question,
     answer,
+    messageId, // Simpan messageId
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
-  console.log("💾 Message saved to Firestore");
+  console.log("💾 Message saved to Firestore, messageId:", messageId);
 }
 
 export async function getMessages(sessionId) {

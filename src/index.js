@@ -9,9 +9,8 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.status(200).send("✅ Bot Lark Base aktif, bro!");
-});
+// Simpan message_id yang sudah diproses
+const processedMessages = new Set();
 
 // ====================================================
 // 🔹 LARK CLIENT
@@ -23,8 +22,12 @@ const client = new lark.Client({
   domain: lark.Domain.Lark,
 });
 
+app.get("/", (req, res) => {
+  res.status(200).send("✅ Bot Lark aktif bro!");
+});
+
 // ====================================================
-// 🔹 Kirim Pesan Balasan ke Lark
+// 🔹 Kirim pesan balasan
 // ====================================================
 async function sendMessage(receiveType, receiveId, text) {
   try {
@@ -48,26 +51,34 @@ app.post("/api/lark", async (req, res) => {
   try {
     const { header, event, type, challenge } = req.body;
 
-    // ✅ Validasi URL Webhook
+    // 🔹 Verifikasi URL
     if (type === "url_verification") {
       return res.json({ challenge });
     }
 
-    // ✅ Hanya proses event dari im.message.receive_v1
+    // 🔹 Hanya proses event pesan
     if (header?.event_type !== "im.message.receive_v1") {
-      console.log(`ℹ️ Dilewati event: ${header?.event_type}`);
       return res.status(200).send();
     }
 
-    // 🧠 Cegah bot balas pesan sendiri
+    const messageId = event?.message?.message_id;
+    if (!messageId) return res.status(200).send();
+
+    // 🚫 Cegah duplikat (jika message_id sudah pernah diproses)
+    if (processedMessages.has(messageId)) {
+      console.log("⏩ Pesan sudah diproses sebelumnya, dilewati:", messageId);
+      return res.status(200).send();
+    }
+    processedMessages.add(messageId);
+
+    // 🚫 Jangan balas pesan dari bot sendiri
     if (event?.sender?.sender_type === "bot") {
-      console.log("🚫 Pesan dari bot sendiri, diabaikan.");
+      console.log("🚫 Pesan dari bot sendiri, dilewati.");
       return res.status(200).send();
     }
 
-    const messageObj = event?.message;
-    if (!messageObj) return res.status(200).send();
-
+    // Ambil isi pesan
+    const messageObj = event.message;
     const userMessage = JSON.parse(messageObj.content)?.text?.trim();
     const receiveId = messageObj.chat_id;
     const receiveType = "chat_id";
@@ -87,18 +98,18 @@ app.post("/api/lark", async (req, res) => {
     }
 
     // ====================================================
-    // 🔹 Prompt dinamis (biar NLP bebas)
+    // 🔹 Prompt ke Gemini
     // ====================================================
     const prompt = `
-Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
+Kamu adalah asisten yang menjawab berdasarkan data tabel berikut:
 Kolom: ${columns.join(", ")}
-Data (maks 30 contoh):
-${JSON.stringify(records.slice(0, 30), null, 2)}
+Data contoh:
+${JSON.stringify(records.slice(0, 20), null, 2)}
 
 User bertanya: "${userMessage}"
-Jawablah berdasarkan data di atas. 
-Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
-Gunakan bahasa Indonesia alami dan santai.
+Jawablah berdasarkan data di atas.
+Jika tidak relevan, jawab: "Data tidak ditemukan di tabel."
+Gunakan bahasa Indonesia santai.
 `;
 
     // ====================================================
@@ -109,40 +120,31 @@ Gunakan bahasa Indonesia alami dan santai.
       { contents: [{ parts: [{ text: prompt }] }] }
     );
 
-    // ====================================================
-    // 🔹 Ambil dan bersihkan jawaban Gemini
-    // ====================================================
     let reply =
       geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "⚠️ Tidak ada respons dari Gemini.";
 
-    // 🧹 Bersihkan duplikasi, JSON, dan block markdown
     reply = reply
-      .replace(/```[\s\S]*?```/g, "") // hapus blok kode markdown
-      .split(/Oke,|oke,|Baik,|baik,/i)[0] // ambil bagian awal sebelum Gemini mulai ngulang
+      .replace(/```[\s\S]*?```/g, "")
+      .split(/Oke,|oke,|Baik,|baik,/i)[0]
       .trim();
 
-    if (!reply) reply = "⚠️ Tidak ada jawaban yang relevan dari Gemini.";
+    if (!reply) reply = "⚠️ Tidak ada jawaban relevan dari Gemini.";
 
     await sendMessage(receiveType, receiveId, reply);
     res.status(200).send({ ok: true });
   } catch (err) {
-    console.error("❌ Error webhook:", err.response?.data || err.message);
+    console.error("❌ Error di webhook:", err.response?.data || err.message);
     res.status(500).send({ error: err.message });
   }
 });
 
 // ====================================================
-// 🔹 Jalankan Lokal
+// 🔹 Jalankan lokal
 // ====================================================
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running di http://localhost:${PORT}`);
-  });
+  app.listen(PORT, () => console.log(`🚀 Server jalan di http://localhost:${PORT}`));
 }
 
-// ====================================================
-// 🔹 Export untuk Vercel
-// ====================================================
 export default app;

@@ -53,7 +53,12 @@ app.post("/api/lark", async (req, res) => {
     if (type === "url_verification") {
       return res.json({ challenge });
     }
-
+    
+    // 🧠 Tambahin baris ini buat cegah looping
+    if (event?.sender?.sender_type === "bot") {
+      console.log("🚫 Pesan dari bot sendiri, diabaikan.");
+      return res.status(200).send();
+    }
     const messageObj = event?.message;
     if (!messageObj) return res.status(200).send();
 

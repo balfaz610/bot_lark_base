@@ -98,26 +98,41 @@ app.post("/api/lark", async (req, res) => {
     // ====================================================
     // 🔹 Ambil data dari Lark Base
     // ====================================================
-    const { columns, records } = await getBaseData();
-    if (records.length === 0) {
-      await sendMessage(receiveType, receiveId, "⚠️ Tidak ada data di tabel Lark Base.");
-      return res.status(200).send();
-    }
+   // ====================================================
+// 🔹 Ambil data dari beberapa tabel Lark Base
+// ====================================================
+const baseData = await getBaseData();
+const tableNames = Object.keys(baseData);
 
-    // ====================================================
-    // 🔹 Prompt dinamis
-    // ====================================================
-    const prompt = `
-Kamu adalah AI asisten yang menjawab pertanyaan berdasarkan data berikut:
-Kolom: ${columns.join(", ")}
-Data (maks 20 contoh):
-${JSON.stringify(records.slice(0, 20), null, 2)}
+if (tableNames.length === 0) {
+  await sendMessage(receiveType, receiveId, "⚠️ Tidak ada tabel yang ditemukan di Lark Base, bro.");
+  return res.status(200).send();
+}
+
+// Bikin deskripsi tabel-tabel buat prompt
+const tablesSummary = tableNames
+  .map(
+    (name) => `
+📘 Tabel: ${name}
+Kolom: ${baseData[name].columns.join(", ")}
+Contoh Data:
+${JSON.stringify(baseData[name].records.slice(0, 5), null, 2)}
+`
+  )
+  .join("\n--------------------------------------\n");
+
+// ====================================================
+// 🔹 Prompt dinamis multi-tabel
+// ====================================================
+const prompt = `
+Kamu adalah AI asisten yang menjawab pertanyaan user berdasarkan data dari beberapa tabel Lark Base berikut:
+${tablesSummary}
 
 User bertanya: "${userMessage}"
-Jawablah berdasarkan data di atas. 
+Jawablah dengan bahasa Indonesia yang santai dan berdasarkan data di atas.
 Jika tidak relevan dengan data, jawab: "Data tidak ditemukan di tabel."
-Gunakan bahasa Indonesia alami dan santai.
 `;
+
 
     // ====================================================
     // 🔹 Kirim ke Gemini API

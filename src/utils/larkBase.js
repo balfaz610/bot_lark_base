@@ -1,34 +1,48 @@
-import axios from "axios";
+import lark from "@larksuiteoapi/node-sdk";
+import dotenv from "dotenv";
+dotenv.config();
 
+// ====================================================
+// 🔹 INIT LARK CLIENT
+// ====================================================
+const client = new lark.Client({
+  appId: process.env.LARK_APP_ID,
+  appSecret: process.env.LARK_APP_SECRET,
+  appType: lark.AppType.SelfBuilt,
+  domain: lark.Domain.Lark,
+});
+
+// ====================================================
+// 🔹 Fungsi Ambil Data dari Banyak Tabel
+// ====================================================
 export async function getBaseData() {
-  try {
-    // 🔹 Ambil tenant access token dari Lark API
-    const authRes = await axios.post(
-      "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal",
-      {
-        app_id: process.env.LARK_APP_ID,
-        app_secret: process.env.LARK_APP_SECRET,
-      }
-    );
+  const appToken = process.env.LARK_APP_TOKEN;
 
-    const tenantToken = authRes.data.tenant_access_token;
+  // daftar tabel berdasarkan ENV yang tersedia
+  const tableConfigs = Object.entries(process.env)
+    .filter(([key]) => key.startsWith("LARK_TABLE_") && key.endsWith("_ID"))
+    .map(([key, value]) => ({
+      name: key.replace("LARK_TABLE_", "").replace("_ID", "").toLowerCase(),
+      tableId: value,
+    }));
 
-    // 🔹 Ambil data dari tabel Lark Base
-    const res = await axios.get(
-      `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_APP_TOKEN}/tables/${process.env.LARK_TABLE_ID}/records`,
-      {
-        headers: {
-          Authorization: `Bearer ${tenantToken}`,
-        },
-      }
-    );
+  const result = {};
 
-    const records = res.data?.data?.items?.map((item) => item.fields) || [];
-    const columns = records.length > 0 ? Object.keys(records[0]) : [];
+  for (const { name, tableId } of tableConfigs) {
+    try {
+      const res = await client.bitable.appTableRecord.list({
+        path: { app_token: appToken, table_id: tableId },
+      });
 
-    return { columns, records };
-  } catch (err) {
-    console.error("❌ Gagal ambil data Lark Base:", err.response?.data || err.message);
-    return { columns: [], records: [] };
+      const records = res.data?.items?.map((item) => item.fields) || [];
+      const columns = records.length ? Object.keys(records[0]) : [];
+
+      result[name] = { columns, records };
+      console.log(`✅ Loaded tabel ${name}: ${records.length} record`);
+    } catch (err) {
+      console.error(`❌ Gagal ambil data tabel ${name}:`, err.response?.data || err.message);
+    }
   }
+
+  return result;
 }

@@ -17,9 +17,7 @@ app.get("/", (req, res) => {
   res.status(200).send("✅ Bot Lark Base aktif, bro!");
 });
 
-// ====================================================
-// 🔹 LARK CLIENT
-// ====================================================
+
 const client = new lark.Client({
   appId: process.env.LARK_APP_ID,
   appSecret: process.env.LARK_APP_SECRET,
